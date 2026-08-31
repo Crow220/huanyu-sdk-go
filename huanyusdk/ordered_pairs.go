@@ -45,8 +45,10 @@ func (p *OrderedPairs) Keys() []string {
 // 均会破坏与 PHP json_encode($v, JSON_UNESCAPED_UNICODE) 的字节级一致。
 // 输出 {"k":"v","k2":"v2"}：无空格、保 keys 序、UTF-8 原样；
 // 转义集与 PHP json_encode 实测对齐：'/' → \/、'"' → \"、'\' → \\、
-// \b \f \n \r \t 短转义、其余 <0x20 控制字符 → \u00xx（小写十六进制）、< > & 原样。
+// \b \f \n \r \t 短转义、其余 <0x20 控制字符 → \u00xx（小写十六进制）、
+// U+2028/U+2029 → \u2028/\u2029（PHP 固有转义）、< > & 原样。
 // 值均为 string（本 SDK 的数组参数叶子值按 PHP 语义为字符串）。
+// 输入须为合法 UTF-8，否则行为未定义（截断的多字节序列会被原样输出）。
 //
 // 注意：调用方须直接使用本方法返回值；不要把 *OrderedPairs 交给 json.Marshal——
 // encoding/json 会对 MarshalJSON 的输出再压缩并做 HTML 转义，< > & 会变成 \u003c 形式。
@@ -66,7 +68,8 @@ func (p *OrderedPairs) MarshalJSON() ([]byte, error) {
 }
 
 // writeJSONString 按上述转义集写入带引号的 JSON 字符串。
-// 逐字节扫描是安全的：UTF-8 多字节序列的每个字节都 >= 0x80，原样落入 default 分支。
+// 逐字节扫描是安全的：UTF-8 多字节序列的每个字节都 >= 0x80，原样落入 default 分支；
+// 唯一例外是 U+2028/U+2029（见下方特判）。
 func writeJSONString(buf *bytes.Buffer, s string) {
 	buf.WriteByte('"')
 	for i := 0; i < len(s); i++ {
@@ -88,10 +91,22 @@ func writeJSONString(buf *bytes.Buffer, s string) {
 		case '\t':
 			buf.WriteString(`\t`)
 		default:
-			if c < 0x20 {
+			switch {
+			case c < 0x20:
 				// PHP json_encode 用小写十六进制输出控制字符
 				fmt.Fprintf(buf, `\u%04x`, c)
-			} else {
+			case c == 0xE2 && i+2 < len(s) && s[i+1] == 0x80 && (s[i+2] == 0xA8 || s[i+2] == 0xA9):
+				// U+2028（行分隔符）/U+2029（段分隔符），UTF-8 三字节 E2 80 A8/A9：
+				// PHP json_encode 即使 JSON_UNESCAPED_UNICODE 也固有转义为 \u2028/\u2029，
+				// 粘贴的收款人名等合法输入可含此类字符，须逐字节对齐真源。
+				// 须确认后两字节才转义，其余 E2 开头的合法序列（—、… 等）原样放行。
+				if s[i+2] == 0xA8 {
+					buf.WriteString(`\u2028`)
+				} else {
+					buf.WriteString(`\u2029`)
+				}
+				i += 2 // 跳过该三字节序列的剩余两字节
+			default:
 				buf.WriteByte(c) // UTF-8 原样（中文、< > & 均不转义）
 			}
 		}

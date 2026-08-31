@@ -1,3 +1,3 @@
 module github.com/crow220/huanyu-sdk-go
 
-go 1.27.0
+go 1.22

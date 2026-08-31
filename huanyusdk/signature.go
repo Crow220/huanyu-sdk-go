@@ -9,7 +9,7 @@ import (
 )
 
 // Sign 按 spec/signature.md 六步计算签名，行为由 common/vectors 测试向量锁定。
-// params 的值只接受 string、*OrderedPairs（数组类参数）与 nil（跳过）；
+// params 的值只接受 string、*OrderedPairs（非 nil，数组类参数）与 nil（跳过）；
 // 数字请以字符串形式传入（如 "100.50"），规避各语言浮点序列化差异。
 func Sign(params map[string]interface{}, apiSecret string) string {
 	// 第 1 步：移除 signature 字段本身（只跳过、不删除，不修改调用方的 map）。
@@ -31,6 +31,10 @@ func Sign(params map[string]interface{}, apiSecret string) string {
 		var value string
 		switch v := params[key].(type) {
 		case *OrderedPairs:
+			if v == nil {
+				// typed-nil 大概率是声明后未初始化的变量，静默参与签名只会换来服务端拒签
+				panic(fmt.Sprintf("huanyusdk: 参数 %q 为 (*OrderedPairs)(nil)，请传 NewOrderedPairs() 构造的实例或 nil", key))
+			}
 			// 第 2 步：数组/对象参数序列化为与 PHP json_encode 对齐的字符串。
 			encoded, err := v.MarshalJSON()
 			if err != nil {

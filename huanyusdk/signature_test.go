@@ -140,6 +140,17 @@ func TestSignPanicsOnUnsupportedParamType(t *testing.T) {
 	_ = Sign(map[string]interface{}{"payment_amount": 100.5}, "sk")
 }
 
+// typed-nil 的 *OrderedPairs 几乎必为未初始化变量，须明确报错而非静默当作空对象参与签名。
+func TestSignPanicsOnTypedNilOrderedPairs(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("传入 (*OrderedPairs)(nil) 应触发 panic")
+		}
+	}()
+	var paymentMethod *OrderedPairs // 声明后未初始化
+	_ = Sign(map[string]interface{}{"payment_method": paymentMethod}, "sk")
+}
+
 // 全部参数被跳过的边界（spec 标注为不可达）：行为须与 PHP 参考实现一致，
 // 即待签串为空串时仍拼 "&api_secret=..."（rtrim(”) = ”）。
 // 期望值由 php -r 'echo strtoupper(md5("&api_secret=s"));' 实测得出。
@@ -203,6 +214,9 @@ func TestOrderedPairsMarshalJSONEscapeRules(t *testing.T) {
 		{"退格短转义", "k", "a\bb", `{"k":"a\bb"}`},
 		{"换页短转义", "k", "a\fb", `{"k":"a\fb"}`},
 		{"其余控制字符小写十六进制", "k", "a\x00\x01\x1fb", `{"k":"a\u0000\u0001\u001fb"}`},
+		{"U+2028行分隔符转义（值）", "k", "深圳\u2028分行", `{"k":"深圳\u2028分行"}`},
+		{"U+2029段分隔符转义（键）", "sub\u2029bank", "1", `{"sub\u2029bank":"1"}`},
+		{"其余E2开头序列不受影响", "k", "破折号—省略号…", `{"k":"破折号—省略号…"}`},
 		{"空字符串", "k", "", `{"k":""}`},
 	}
 	for _, c := range cases {
