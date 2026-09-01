@@ -30,6 +30,8 @@ if err != nil {
 
 // 卖出示例：PaymentMethod 必填，请用 NewOrderedPairs().Set(...) 链式构造——
 // 字段 Set 顺序即签名顺序（服务端按字段出现序验签），不要用 Go map（遍历无序，签名不稳定）
+// 注意换一个商户单号：同商户重复单号会被"商户单号已存在"拒绝
+params.MerchantOrderNo = "M20260831002"
 params.PaymentMethod = huanyusdk.NewOrderedPairs().
 	Set("bank", "中国工商银行").
 	Set("sub_bank", "杭州某某支行").
