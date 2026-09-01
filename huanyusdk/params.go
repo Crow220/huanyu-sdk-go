@@ -12,6 +12,7 @@ type CreateOrderParams struct {
 	Mobile          string        // 三要素之一
 	Remark          string        // 选填备注
 	MerchantOrderNo string        // 商户内唯一；重复单号建单返回"商户单号已存在"，超时可用同号安全重试
+	CallbackUrl     string        // 本单回调地址（http/https，限长255）；未设置用商户默认回调地址
 }
 
 // ToSignParams 输出参与签名与上行的参数：跳过零值字段，PaymentMethod 非 nil 才携带。
@@ -44,6 +45,9 @@ func (p *CreateOrderParams) ToSignParams() map[string]interface{} {
 	}
 	if p.MerchantOrderNo != "" {
 		params["merchant_order_no"] = p.MerchantOrderNo
+	}
+	if p.CallbackUrl != "" {
+		params["callback_url"] = p.CallbackUrl
 	}
 	return params
 }
