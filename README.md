@@ -1,6 +1,6 @@
 # huanyu-sdk-go
 
-寰宇（PISCES）商户平台官方 Go SDK。
+PISCES商户平台官方 Go SDK。
 
 ## 安装
 
