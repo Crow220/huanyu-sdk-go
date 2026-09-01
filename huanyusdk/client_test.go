@@ -275,6 +275,39 @@ func TestClientEnvelopeTimeFormTolerance(t *testing.T) {
 	})
 }
 
+// ③c 信封 data 空数组形态：真实后端失败信封的 data 是 PHP 空数组序列化的 []，
+// 曾导致整体 Unmarshal 失败、业务错误（如"商户单号已存在"）被误报成"平台响应格式异常"。
+func TestClientEnvelopeEmptyArrayDataTolerance(t *testing.T) {
+	t.Run("错误信封data空数组", func(t *testing.T) {
+		client := startTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprint(w, `{"code":0,"msg":"商户单号已存在：M001","time":"1788225292","data":[]}`)
+		})
+		_, err := client.CreateOrder(&CreateOrderParams{OrderType: "1", CnyAmount: "50.00", MerchantOrderNo: "M001"})
+		apiErr, ok := err.(*ApiError)
+		if !ok {
+			t.Fatalf("data=[] 的错误信封应正常解出 *ApiError，实际 %T: %v", err, err)
+		}
+		if !strings.Contains(apiErr.Msg, "商户单号已存在") {
+			t.Errorf("Msg 应含商户单号已存在，实际 %q", apiErr.Msg)
+		}
+		if apiErr.Time != 1788225292 {
+			t.Errorf("Time 解析不符：%d", apiErr.Time)
+		}
+	})
+	t.Run("成功信封data空数组", func(t *testing.T) {
+		client := startTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprint(w, `{"code":1,"msg":"ok","time":"1788225292","data":[]}`)
+		})
+		result, err := client.OrderList(&OrderListFilters{Page: "1"})
+		if err != nil {
+			t.Fatalf("data=[] 的成功信封不应解析失败: %v", err)
+		}
+		if len(result) != 0 {
+			t.Errorf("非对象 data 应按空 map 处理，实际 %v", result)
+		}
+	})
+}
+
 // ④ OrderDetail：GET query 含 order_no 与 signature，未知键被白名单过滤，服务端重算签名一致。
 func TestClientOrderDetailSendsFilteredQuery(t *testing.T) {
 	var gotMethod, gotPath string

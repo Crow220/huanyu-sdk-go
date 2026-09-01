@@ -229,10 +229,12 @@ func parseEnvelope(statusCode int, body []byte) (map[string]interface{}, error) 
 		return nil, fmt.Errorf("平台响应异常（HTTP %d）: %s", statusCode, snippet(body))
 	}
 	var envelope struct {
-		Code *int                   `json:"code"` // 指针区分"缺 code"与 code=0（后者是真实业务失败）
-		Msg  string                 `json:"msg"`
-		Time flexInt                `json:"time"`
-		Data map[string]interface{} `json:"data"`
+		Code *int    `json:"code"` // 指针区分"缺 code"与 code=0（后者是真实业务失败）
+		Msg  string  `json:"msg"`
+		Time flexInt `json:"time"`
+		// Data 用 interface{}：真实后端失败信封的 data 是 PHP 空数组序列化的 []，
+		// 用 map 类型会让整次 Unmarshal 失败、把业务错误误报成"平台响应格式异常"。
+		Data interface{} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &envelope); err != nil || envelope.Code == nil {
 		return nil, fmt.Errorf("平台响应格式异常: %s", snippet(body))
@@ -240,10 +242,11 @@ func parseEnvelope(statusCode int, body []byte) (map[string]interface{}, error) 
 	if *envelope.Code != 1 {
 		return nil, NewApiError(*envelope.Code, envelope.Msg, int64(envelope.Time))
 	}
-	if envelope.Data == nil {
-		return map[string]interface{}{}, nil
+	if data, ok := envelope.Data.(map[string]interface{}); ok {
+		return data, nil
 	}
-	return envelope.Data, nil
+	// data 缺失/null/非对象（如 []）按空 data 处理，对齐 Java instanceof Map 与 PHP 空数组语义。
+	return map[string]interface{}{}, nil
 }
 
 // snippet 响应片段截断（对齐 PHP substr($body, 0, 200) 的字节级语义），便于排障且不刷屏。
