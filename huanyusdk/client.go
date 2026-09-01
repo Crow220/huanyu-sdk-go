@@ -176,7 +176,8 @@ func flattenAll(params map[string]interface{}) formPairs {
 // 键序保持插入序、绝不排序：后端 parse_str 按到达序重嵌套、json_encode 的键序即验签键序，
 // 与 Sign 在原始嵌套参数上的 JSON 化键序逐字对齐是嵌套参数验签通过的关键
 // （这也是 out 不用 url.Values 的原因：其 Encode() 会按键排序丢失插入序）。
-// nil 与空串不上行（与 Sign 第 4 步跳过规则一致，防线前移到发射侧）。
+// 仅 nil 不上行：顶层空串上行后服务端重算同样跳过（等价），
+// 嵌套空串必须上行以保住 json_encode 键值形态——Sign 的跳空值仅作用于顶层标量。
 func flattenParams(prefix string, v interface{}, out *formPairs) {
 	switch value := v.(type) {
 	case *OrderedPairs:
@@ -187,9 +188,7 @@ func flattenParams(prefix string, v interface{}, out *formPairs) {
 			flattenParams(prefix+"["+key+"]", value.vals[key], out)
 		}
 	case string:
-		if value != "" {
-			*out = append(*out, formPair{key: prefix, value: value})
-		}
+		*out = append(*out, formPair{key: prefix, value: value})
 	case nil:
 		return
 	default:

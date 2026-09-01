@@ -332,6 +332,47 @@ func TestClientUploadPaymentProofSendsForm(t *testing.T) {
 	}
 }
 
+// ⑦ 嵌套空串回归：PaymentMethod 含空串叶子（sub_bank 未填）时必须上行
+// payment_method[sub_bank]= 空值键——服务端 parse_str 重嵌套后 json_encode 才保得住该键，
+// 与客户端签名时的 JSON 形态一致。修复前展平跳过空串 → 服务端重嵌套缺键 → 拒签。
+func TestClientCreateOrderNestedEmptyStringLeafRoundtrip(t *testing.T) {
+	var gotBody string
+	client := startTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		gotBody = string(body)
+		fmt.Fprint(w, `{"code":1,"msg":"订单创建成功","time":1756684800,`+
+			`"data":{"order_no":"HY003","result_status":"success"}}`)
+	})
+
+	paymentMethod := NewOrderedPairs().
+		Set("bank", "工商银行").
+		Set("sub_bank", "").
+		Set("card_number", "6222020200112233445").
+		Set("real_name", "张三")
+	if _, err := client.CreateOrder(&CreateOrderParams{
+		OrderType:       "2",
+		CnyAmount:       "500.00",
+		PaymentMethod:   paymentMethod,
+		MerchantOrderNo: "M003",
+	}); err != nil {
+		t.Fatalf("CreateOrder 失败: %v", err)
+	}
+
+	flat := parseOrderedForm(t, gotBody)
+	sent := flatToMap(flat)
+	value, ok := sent["payment_method[sub_bank]"]
+	if !ok {
+		t.Fatal("嵌套空串叶子必须上行：缺少 payment_method[sub_bank] 键")
+	}
+	if value != "" {
+		t.Errorf("payment_method[sub_bank] 应为空值：%q", value)
+	}
+	// 服务端视角：重嵌套（含空串叶子）后重算签名，应与上行 signature 一致
+	if got, want := Sign(renest(t, flat), testAPISecret), sent["signature"]; got != want {
+		t.Errorf("含空串叶子的重嵌套重算签名不一致：期望 %s，实际 %s", want, got)
+	}
+}
+
 // 信封防御：响应非 JSON 或缺 code 返回错误，消息含截断片段。
 func TestClientMalformedResponseReturnsError(t *testing.T) {
 	t.Run("非JSON", func(t *testing.T) {
@@ -415,14 +456,22 @@ func jsonResponse(body string) *http.Response {
 	}
 }
 
-// flattenParams 直测：nil 与空串不上行，其余成对。
-func TestFlattenParamsSkipsNilAndEmptyString(t *testing.T) {
+// flattenParams 直测：仅 nil 不上行；空串（含顶层）照常成对上行。
+// 顶层空串上行后服务端重算签名同样跳过（等价），嵌套空串上行是保住
+// json_encode 键值形态的硬要求（见 TestClientCreateOrderNestedEmptyStringLeafRoundtrip）。
+func TestFlattenParamsSkipsNilOnly(t *testing.T) {
 	flat := make(formPairs, 0)
 	flattenParams("remark", "", &flat)
 	flattenParams("extra", nil, &flat)
 	flattenParams("order_type", "2", &flat)
 
-	if len(flat) != 1 || flat[0].key != "order_type" || flat[0].value != "2" {
-		t.Errorf("nil 与空串应被跳过：实际 %v", flat)
+	if len(flat) != 2 {
+		t.Fatalf("应上行空串与普通值、仅跳过 nil：实际 %v", flat)
+	}
+	if flat[0].key != "remark" || flat[0].value != "" {
+		t.Errorf("空串应原样成对上行：实际 %v", flat[0])
+	}
+	if flat[1].key != "order_type" || flat[1].value != "2" {
+		t.Errorf("普通值成对不符：实际 %v", flat[1])
 	}
 }

@@ -108,6 +108,7 @@ if err != nil {
 }
 ```
 
+- **数组参数叶子值用空字符串表示"未填"**：卖出单 PaymentMethod 的可选字段请 `Set("sub_bank", "")` 显式传空串，不要留空不 Set；叶子值无法表达 null（表单线路的协议限制，见 common/spec/signature.md"已知限制"）。
 - **nonce 自动生成**：平台要求每个请求的 nonce 在 10 分钟窗口内一次性有效（防重放）。SDK 每次调用都会自动生成全新的 timestamp/nonce/signature，失败后直接再次调用即可，无需（也不要）缓存复用请求参数。
 - timestamp 为秒级时间戳，本机时钟偏差超过 ±300 秒会验签失败。
 
