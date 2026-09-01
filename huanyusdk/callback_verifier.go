@@ -17,9 +17,16 @@ func NewCallbackVerifier(apiSecret string) *CallbackVerifier {
 	return &CallbackVerifier{apiSecret: apiSecret}
 }
 
-// Verify 校验回调表单签名：signature 缺失或空串直接拒绝（对齐 PHP empty() 判断）；
-// 其余字段按签名算法重算后与上行 signature 恒时比较（对齐 PHP hash_equals，防时序侧信道）。
+// Verify 校验回调表单签名：任一键出现重复（一键多值）直接拒绝——PHP 表单解析取末值而
+// Go url.Values.Get 取首值，重复键在两端语义分歧，一律拒绝更安全；signature 缺失或空串
+// 直接拒绝（对齐 PHP empty() 判断）；其余字段按签名算法重算后与上行 signature
+// 恒时比较（对齐 PHP hash_equals，防时序侧信道）。
 func (v *CallbackVerifier) Verify(form url.Values) bool {
+	for key := range form {
+		if len(form[key]) > 1 {
+			return false
+		}
+	}
 	signature := form.Get("signature")
 	if signature == "" {
 		return false
@@ -29,7 +36,7 @@ func (v *CallbackVerifier) Verify(form url.Values) bool {
 	return subtle.ConstantTimeCompare([]byte(expected), []byte(signature)) == 1
 }
 
-// formToMap 把回调表单转为 Sign 的入参形态；回调字段全标量，一键多值时取首个。
+// formToMap 把回调表单转为 Sign 的入参形态；回调字段全标量（重复键已被 Verify 前置拒绝）。
 func formToMap(form url.Values) map[string]interface{} {
 	params := make(map[string]interface{}, len(form))
 	for key := range form {

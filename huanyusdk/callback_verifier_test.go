@@ -78,6 +78,17 @@ func TestCallbackVerifierRejectsEmptySignature(t *testing.T) {
 	}
 }
 
+// TestCallbackVerifierRejectsDuplicateKeys 任一键出现重复（一键多值）时直接拒绝：
+// 即使重复值与原值相同（Go 取首值重算签名本可命中），也拒绝——
+// PHP 表单解析取末值、Go 取首值，重复键语义分歧，一律不放过。
+func TestCallbackVerifierRejectsDuplicateKeys(t *testing.T) {
+	form := firstCallbackForm(t)
+	form.Add("cny_amount", form.Get("cny_amount")) // 同值重复，重算签名仍会命中，须靠前置检查拒绝
+	if NewCallbackVerifier(loadCallbackVectors(t).APISecret).Verify(form) {
+		t.Error("重复键（cny_amount 出现两次）时不应验签通过")
+	}
+}
+
 // firstCallbackForm 取 callback-full 向量的表单拷贝，用例间不共享可变状态。
 func firstCallbackForm(t *testing.T) url.Values {
 	t.Helper()
