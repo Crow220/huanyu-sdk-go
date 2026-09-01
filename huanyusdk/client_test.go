@@ -110,7 +110,7 @@ func TestClientCreateOrderFlattensNestedPaymentMethod(t *testing.T) {
 	client := startTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		gotMethod, gotPath, gotBody = r.Method, r.URL.Path, string(body)
-		fmt.Fprint(w, `{"code":1,"msg":"订单创建成功","time":1756684800,`+
+		fmt.Fprint(w, `{"code":1,"msg":"订单创建成功","time":"1756684800",`+
 			`"data":{"order_no":"HY002","result_status":"success"}}`)
 	})
 
@@ -209,7 +209,7 @@ func TestClientCreateOrderPendingIdentityReturnsUrl(t *testing.T) {
 // ③ code=0 返回 *ApiError，断言 Code/Msg/Time。
 func TestClientNonSuccessCodeReturnsApiError(t *testing.T) {
 	client := startTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `{"code":0,"msg":"签名错误","time":1756684800,"data":null}`)
+		fmt.Fprint(w, `{"code":0,"msg":"签名错误","time":"1756684800","data":null}`)
 	})
 
 	data, err := client.OrderList(&OrderListFilters{Page: "1"})
@@ -229,6 +229,50 @@ func TestClientNonSuccessCodeReturnsApiError(t *testing.T) {
 	if apiErr.Time != 1756684800 {
 		t.Errorf("Time 期望 1756684800，实际 %d", apiErr.Time)
 	}
+}
+
+// ③b 信封 time 数字形态宽容：真实后端恒为字符串（TP5 input() 强转），但裸数字也要能解，
+// 且 time 缺失/null 不应导致整单解析失败。反向兜底：非数字垃圾值仍走"平台响应格式异常"。
+func TestClientEnvelopeTimeFormTolerance(t *testing.T) {
+	t.Run("裸数字time", func(t *testing.T) {
+		client := startTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprint(w, `{"code":0,"msg":"签名错误","time":1756684800,"data":null}`)
+		})
+		_, err := client.OrderList(&OrderListFilters{Page: "1"})
+		apiErr, ok := err.(*ApiError)
+		if !ok {
+			t.Fatalf("裸数字 time 应正常解析并返回 *ApiError，实际 %T: %v", err, err)
+		}
+		if apiErr.Time != 1756684800 {
+			t.Errorf("裸数字 time 解析值不符：期望 1756684800，实际 %d", apiErr.Time)
+		}
+	})
+	t.Run("缺失与null的time", func(t *testing.T) {
+		for _, body := range []string{
+			`{"code":1,"msg":"ok","data":{"order_no":"HY001"}}`,
+			`{"code":1,"msg":"ok","time":null,"data":{"order_no":"HY001"}}`,
+		} {
+			client := startTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprint(w, body)
+			})
+			order, err := client.OrderDetail(map[string]string{"order_no": "HY001"})
+			if err != nil {
+				t.Fatalf("time 缺失/null 不应导致解析失败（body=%s）: %v", body, err)
+			}
+			if order["order_no"] != "HY001" {
+				t.Errorf("data 解析不符（body=%s）：%v", body, order)
+			}
+		}
+	})
+	t.Run("非数字垃圾time", func(t *testing.T) {
+		client := startTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprint(w, `{"code":1,"msg":"ok","time":"not-a-number","data":{}}`)
+		})
+		_, err := client.OrderList(&OrderListFilters{Page: "1"})
+		if err == nil || !strings.Contains(err.Error(), "平台响应格式异常") {
+			t.Errorf("无法解析的 time 应返回格式异常错误，实际 %v", err)
+		}
+	})
 }
 
 // ④ OrderDetail：GET query 含 order_no 与 signature，未知键被白名单过滤，服务端重算签名一致。
@@ -340,7 +384,7 @@ func TestClientCreateOrderNestedEmptyStringLeafRoundtrip(t *testing.T) {
 	client := startTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		gotBody = string(body)
-		fmt.Fprint(w, `{"code":1,"msg":"订单创建成功","time":1756684800,`+
+		fmt.Fprint(w, `{"code":1,"msg":"订单创建成功","time":"1756684800",`+
 			`"data":{"order_no":"HY003","result_status":"success"}}`)
 	})
 

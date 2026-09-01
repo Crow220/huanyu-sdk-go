@@ -197,6 +197,30 @@ func flattenParams(prefix string, v interface{}, out *formPairs) {
 	}
 }
 
+// flexInt 兼容字符串/数字两种 JSON 形态的整型。真实后端信封 time 恒为字符串形式的
+// 秒级时间戳（TP5 result() 内 input() 默认强转 string，见 huanyu-backend
+// application/common/controller/Api.php），但网关/历史数据可能出现裸数字，两种都要能解，
+// 否则真实响应会被误判为"平台响应格式异常"。ApiError.Time 对外保持 int64 不变，
+// flexInt 只承担 wire 解析层的形态兼容。
+type flexInt int64
+
+// UnmarshalJSON 接受带引号 "1756684800" 与裸数字 1756684800；null/缺字段/空串视为 0，
+// 其余无法解析的形态返回错误（走"平台响应格式异常"路径，不静默吞掉）。
+func (f *flexInt) UnmarshalJSON(data []byte) error {
+	text := strings.TrimSpace(string(data))
+	text = strings.Trim(text, `"`)
+	if text == "" || text == "null" {
+		*f = 0
+		return nil
+	}
+	value, err := strconv.ParseInt(text, 10, 64)
+	if err != nil {
+		return fmt.Errorf("信封 time 解析失败: %s: %w", snippet(data), err)
+	}
+	*f = flexInt(value)
+	return nil
+}
+
 // parseEnvelope 解析响应信封 {code, msg, data, time}：非 2xx 或 JSON 解析失败/缺 code
 // 返回错误（含截断 body 200 字符）；Code != 1 返回 *ApiError；成功返回 Data
 // （data 缺失/null 时为空 map）。响应解析无保序需求，标准库 encoding/json 可用。
@@ -207,14 +231,14 @@ func parseEnvelope(statusCode int, body []byte) (map[string]interface{}, error) 
 	var envelope struct {
 		Code *int                   `json:"code"` // 指针区分"缺 code"与 code=0（后者是真实业务失败）
 		Msg  string                 `json:"msg"`
-		Time int64                  `json:"time"`
+		Time flexInt                `json:"time"`
 		Data map[string]interface{} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &envelope); err != nil || envelope.Code == nil {
 		return nil, fmt.Errorf("平台响应格式异常: %s", snippet(body))
 	}
 	if *envelope.Code != 1 {
-		return nil, NewApiError(*envelope.Code, envelope.Msg, envelope.Time)
+		return nil, NewApiError(*envelope.Code, envelope.Msg, int64(envelope.Time))
 	}
 	if envelope.Data == nil {
 		return map[string]interface{}{}, nil
