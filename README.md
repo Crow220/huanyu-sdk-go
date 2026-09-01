@@ -21,6 +21,7 @@ params := &huanyusdk.CreateOrderParams{
 	OrderType:       "1",            // 1=买入 2=卖出
 	CnyAmount:       "100.00",
 	MerchantOrderNo: "M20260831001", // 商户内唯一，重复会被拒绝
+	CallbackUrl:     "",               // 选填：本单回调地址，未设置用商户默认（如 "https://..."）
 }
 order, err := client.CreateOrder(params)
 if err != nil {
